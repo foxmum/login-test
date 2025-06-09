@@ -4,34 +4,52 @@ on:
   workflow_dispatch: # 允许手动触发
   schedule:
     # 每个月1号的午夜 (UTC 时间) 运行
-    # Cron 语法: 分 时 日 月 周
-    # '0 0 1 * *' 表示: 0分钟，0小时，每月的1号，每个月，每周的每一天
+    # Cron 语法: 分 时 日 月 周 ('0 0 1 * *')
     - cron: '0 0 1 * *'
 
 jobs:
   login_and_check:
-    runs-on: ubuntu-latest # 使用最新的 Ubuntu Runner
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4 # 拉取你的代码
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10' # 或者你希望使用的 Python 版本
+          python-version: '3.10' # 你可以根据需要调整 Python 版本
 
-      - name: Install Chrome Browser
+      - name: Install Google Chrome Stable
         run: |
-          sudo apt-get update
+          sudo apt-get update -y
           sudo apt-get install -y google-chrome-stable
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          # webdriver-manager 会在这里被调用来下载 ChromeDriver
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          # webdriver-manager will be called by login.py to download ChromeDriver
 
       - name: Run login script
+        id: login_script # 给这个步骤一个 ID，以便后续引用其结果
         env:
-          ACCOUNTS_JSON: ${{ secrets.ACCOUNTS_JSON }} # 从 GitHub Secrets 读取账号信息
+          ACCOUNTS_JSON: ${{ secrets.ACCOUNTS_JSON }}
         run: python login.py
+        continue-on-error: true # 即使脚本失败也继续，以便上传 artifacts
+
+      - name: Upload debug artifacts if login script had issues
+        # 这个步骤只在 login_script 步骤的结果不是 'success' 时运行
+        if: steps.login_script.outcome != 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: login-debug-artifacts-${{ github.run_id }} # 为 artifact 名称添加 run_id 以避免冲突
+          path: |
+            *.png
+            *.html
+          retention-days: 7 # Artifacts 保留天数
+
+      - name: Check script execution outcome
+        if: steps.login_script.outcome != 'success'
+        run: |
+          echo "Login script failed. Please check the logs and uploaded 'login-debug-artifacts' for details."
+          exit 1 # 显式地使整个 job 失败
