@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import random # For random sleep
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service as ChromeService
@@ -18,8 +19,15 @@ LOGIN_BUTTON_SELECTOR = (By.ID, "login")
 
 # --- Success Indicators (after login click) ---
 SUCCESS_URL_CONTAINS = "clientarea.php"
-SUCCESS_TITLE_CONTAINS = "Client Area"
-SUCCESS_ELEMENT_SELECTOR = (By.XPATH, "//h1[normalize-space()='Dashboard']")
+SUCCESS_TITLE_CONTAINS = "Client Area" # General title check
+SUCCESS_DASHBOARD_ELEMENT_SELECTOR = (By.XPATH, "//h1[normalize-space()='Dashboard']") # Primary success element
+
+# New specific success message to look for after dashboard is confirmed
+SUCCESS_MESSAGE_TEXT = "Log into your Client Area at least once every 45 days to prevent the deletion of your Free Service Plan."
+# This XPath will find any element on the page containing the exact success message text.
+# It's more robust to wrap it in normalize-space if there could be odd whitespace.
+SUCCESS_MESSAGE_SELECTOR = (By.XPATH, f"//*[contains(normalize-space(.), '{SUCCESS_MESSAGE_TEXT}')]")
+
 
 # --- Failure Indicator (after login click) ---
 FAILURE_ELEMENT_SELECTOR = (By.XPATH, "//div[contains(@class, 'alert-danger') and normalize-space()='Login Details Incorrect. Please try again.']")
@@ -28,8 +36,7 @@ FAILURE_ELEMENT_SELECTOR = (By.XPATH, "//div[contains(@class, 'alert-danger') an
 def setup_driver():
     """配置并返回一个全新的 Selenium WebDriver 实例"""
     options = webdriver.ChromeOptions()
-    # 无痕模式相关的参数 (headless 已经提供了很好的隔离性, 但这些可以加强)
-    options.add_argument("--incognito") # 明确启用无痕模式
+    options.add_argument("--incognito")
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
@@ -40,11 +47,6 @@ def setup_driver():
     options.add_experimental_option('excludeSwitches', ['enable-automation'])
     options.add_experimental_option('useAutomationExtension', False)
     
-    # 确保每次都下载或使用最新的驱动
-    # 清理 webdriver-manager 缓存可以强制重新下载，但通常不需要
-    # from webdriver_manager.core.utils import WDMCacheManager
-    # WDMCacheManager().clear_cache(osName=None, driverName=None, osType=None, driverVersion=None)
-
     new_driver = None
     try:
         print("Setting up new WebDriver instance...")
@@ -53,23 +55,20 @@ def setup_driver():
         print("New WebDriver instance setup successfully.")
     except Exception as e:
         print(f"Critical Error: Could not initialize Chrome WebDriver: {e}")
-        raise # 如果驱动无法初始化，则抛出异常，由上层处理
+        raise
     
     if new_driver:
         new_driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     return new_driver
 
 def save_debug_info(driver, username, stage="error"):
-    """Saves screenshot and page source for debugging."""
     if not driver:
         print(f"Debug info not saved for {username} at stage '{stage}' because driver is None.")
         return
-        
     safe_username = "".join(c if c.isalnum() else "_" for c in username)
     timestamp = time.strftime("%Y%m%d-%H%M%S")
     screenshot_path = f"{stage}_{safe_username}_{timestamp}.png"
     page_source_path = f"{stage}_source_{safe_username}_{timestamp}.html"
-
     print(f"Saving debug information for {username} at stage '{stage}'.")
     try:
         print(f"Current URL: {driver.current_url}")
@@ -84,113 +83,144 @@ def save_debug_info(driver, username, stage="error"):
 
 
 def login_single_account(driver, username, password):
-    """执行单个账户的登录操作, 使用传入的 driver 实例"""
     print(f"Attempting to log in as {username} using current browser session...")
-
     try:
         print(f"Navigating to login page: {LOGIN_URL}")
         driver.get(LOGIN_URL)
-        WebDriverWait(driver, 20).until(EC.visibility_of_element_located(USERNAME_SELECTOR)) # 增加等待时间
+        WebDriverWait(driver, 25).until(EC.visibility_of_element_located(USERNAME_SELECTOR))
         
-        print(f"Page title after load: '{driver.title}'")
-        print(f"Current URL after load: {driver.current_url}")
+        print(f"Page title: '{driver.title}', URL: {driver.current_url}")
 
-        print(f"Locating username field with selector: {USERNAME_SELECTOR}")
         username_field = driver.find_element(*USERNAME_SELECTOR)
-        print("Username field found. Clearing and sending keys.")
         username_field.clear()
         username_field.send_keys(username)
+        print("Username entered.")
 
-        print(f"Locating password field with selector: {PASSWORD_SELECTOR}")
         password_field = driver.find_element(*PASSWORD_SELECTOR)
-        print("Password field found. Clearing and sending keys.")
         password_field.clear()
         password_field.send_keys(password)
+        print("Password entered.")
         
-        print(f"Attempting to click login button with ID selector: {LOGIN_BUTTON_SELECTOR}")
+        print(f"Attempting to click login button (ID: {LOGIN_BUTTON_SELECTOR[1]})")
         try:
-            login_button = WebDriverWait(driver, 20).until( # 增加等待时间
-                EC.element_to_be_clickable(LOGIN_BUTTON_SELECTOR)
-            )
-            print("Login button found and clickable. Executing click via JS.")
+            login_button = WebDriverWait(driver, 20).until(EC.element_to_be_clickable(LOGIN_BUTTON_SELECTOR))
+            print("Login button clickable. Executing click via JS.")
             driver.execute_script("arguments[0].click();", login_button)
         except TimeoutException:
-            print(f"Login button (ID: {LOGIN_BUTTON_SELECTOR[1]}) not 'clickable' via explicit wait. Saving debug info.")
-            save_debug_info(driver, username, "login_button_unclickable")
+            print(f"Login button (ID: {LOGIN_BUTTON_SELECTOR[1]}) not 'clickable'. Saving debug info.")
+            save_debug_info(driver, username, "login_btn_unclickable")
             return False
         except (NoSuchElementException, ElementNotInteractableException) as e_click:
-            print(f"Could not find or interact with login button (ID: {LOGIN_BUTTON_SELECTOR[1]}): {e_click}")
-            save_debug_info(driver, username, "login_button_interaction_fail")
+            print(f"Could not find/interact with login button: {e_click}")
+            save_debug_info(driver, username, "login_btn_interact_fail")
             return False
         
-        print("Login button click attempted. Waiting for success or failure indicator (25s timeout)...")
-        WebDriverWait(driver, 25).until( # 增加等待时间
+        print("Login click attempted. Waiting for page transition or failure message (30s timeout)...")
+        WebDriverWait(driver, 30).until(
             EC.any_of(
-                EC.url_contains(SUCCESS_URL_CONTAINS),
-                EC.title_contains(SUCCESS_TITLE_CONTAINS),
-                EC.visibility_of_element_located(SUCCESS_ELEMENT_SELECTOR),
-                EC.visibility_of_element_located(FAILURE_ELEMENT_SELECTOR)
+                EC.url_contains(SUCCESS_URL_CONTAINS), # Check URL first as it's a strong indicator
+                EC.visibility_of_element_located(FAILURE_ELEMENT_SELECTOR) # Or failure message
             )
         )
 
+        # Primary checks for login success or explicit failure message
         current_url = driver.current_url
         current_title = driver.title
         dashboard_visible = False
         dashboard_header_text = "Not checked/found"
+        found_specific_success_message = False
 
         try: # Check failure message first
             failure_element = driver.find_element(*FAILURE_ELEMENT_SELECTOR)
             if failure_element.is_displayed():
                 print(f"Login failed for {username}. Found failure indicator: '{failure_element.text}'")
-                save_debug_info(driver, username, "login_failed_message_explicit")
+                save_debug_info(driver, username, "login_fail_message")
                 return False
         except NoSuchElementException:
-            pass 
+            pass # Good, no failure message
 
-        try: # Then check success element
-            dashboard_header = driver.find_element(*SUCCESS_ELEMENT_SELECTOR)
+        # Now check primary success conditions (Dashboard and URL/Title)
+        if SUCCESS_URL_CONTAINS not in current_url or SUCCESS_TITLE_CONTAINS not in current_title:
+            print(f"Login may have failed for {username}. URL or Title mismatch.")
+            print(f"  URL: {current_url} (Expected part: '{SUCCESS_URL_CONTAINS}')")
+            print(f"  Title: {current_title} (Expected part: '{SUCCESS_TITLE_CONTAINS}')")
+            # If dashboard isn't visible either, it's a stronger failure sign
+            try:
+                if not driver.find_element(*SUCCESS_DASHBOARD_ELEMENT_SELECTOR).is_displayed():
+                     print("  Dashboard header also not found. Marking as unclear/failed.")
+                     save_debug_info(driver, username, "login_unclear_no_dash_url_title")
+                     return False
+            except NoSuchElementException:
+                print("  Dashboard header not found. Marking as unclear/failed.")
+                save_debug_info(driver, username, "login_unclear_no_dash_url_title")
+                return False
+        
+        # Check for Dashboard H1 (primary content indicator of being in client area)
+        try:
+            dashboard_header = WebDriverWait(driver,10).until(
+                EC.visibility_of_element_located(SUCCESS_DASHBOARD_ELEMENT_SELECTOR)
+            )
             if dashboard_header.is_displayed():
                 dashboard_visible = True
                 dashboard_header_text = dashboard_header.text
-        except NoSuchElementException:
-            pass 
+                print(f"Dashboard header ('{dashboard_header_text}') is visible.")
+            else: # Should not happen if visibility_of_element_located passed
+                print("Dashboard header located but not visible (unexpected).")
+        except TimeoutException:
+            print("Dashboard header not found or not visible within timeout.")
+            save_debug_info(driver, username, "login_no_dashboard_header")
+            return False # If dashboard isn't there, it's not a full success
 
-        if SUCCESS_URL_CONTAINS in current_url and \
-           SUCCESS_TITLE_CONTAINS in current_title and \
-           dashboard_visible:
-            print(f"Successfully logged in as {username}. Conditions met:")
-            print(f"  URL: {current_url}")
-            print(f"  Title: {current_title}")
-            print(f"  Dashboard Header: '{dashboard_header_text}' (Visible: {dashboard_visible})")
-            # save_debug_info(driver, username, "login_success") # Optional: save info on success
+        # If dashboard is visible, now look for the SPECIFIC success message
+        if dashboard_visible:
+            print(f"Checking for specific success message: '{SUCCESS_MESSAGE_TEXT}'")
+            try:
+                specific_message_element = WebDriverWait(driver, 10).until(
+                    EC.visibility_of_element_located(SUCCESS_MESSAGE_SELECTOR)
+                )
+                if specific_message_element.is_displayed():
+                    found_specific_success_message = True
+                    print(f"Found specific success message: '{specific_message_element.text.strip()}'")
+                else:
+                    print("Specific success message located but not visible.")
+            except TimeoutException:
+                print("Specific success message NOT found on the page.")
+                # Depending on strictness, you might return False here if this message is mandatory.
+                # For now, we'll log it and proceed if other conditions are met,
+                # but flag overall success based on this.
+
+        # Final success determination
+        if dashboard_visible and found_specific_success_message:
+            print(f"ALL SUCCESS CONDITIONS MET for {username}.")
+            print(f"  URL: {current_url}, Title: {current_title}")
+            print(f"  Dashboard: '{dashboard_header_text}', Specific Message: Found.")
+            print("Pausing for 3 seconds as requested...")
+            time.sleep(3)
             return True
         else:
-            print(f"Login outcome unclear for {username}. Failure message not seen, but success conditions not fully met.")
-            print(f"  URL: {current_url} (Expected part: '{SUCCESS_URL_CONTAINS}')")
-            print(f"  Title: {current_title} (Expected part: '{SUCCESS_TITLE_CONTAINS}')")
-            print(f"  Dashboard Header Visible: {dashboard_visible} (Expected: {SUCCESS_ELEMENT_SELECTOR}, Text: '{dashboard_header_text}')")
-            save_debug_info(driver, username, "login_unclear_conditions")
+            print(f"Login for {username} - primary conditions met but specific message MISSING or dashboard issue.")
+            print(f"  Dashboard Visible: {dashboard_visible}, Specific Message Found: {found_specific_success_message}")
+            save_debug_info(driver, username, "login_incomplete_final_check")
             return False
 
     except TimeoutException as te:
-        print(f"A TimeoutException occurred during login for {username}: {str(te).splitlines()[0]}")
+        print(f"A TimeoutException occurred for {username}: {str(te).splitlines()[0]}")
         save_debug_info(driver, username, "login_timeout_main")
-    except NoSuchElementException as nse:
-        print(f"A NoSuchElementException occurred for {username}: {str(nse).splitlines()[0]}")
-        save_debug_info(driver, username, "login_nosuchelement_main")
-    except ElementNotInteractableException as enie:
-        print(f"An ElementNotInteractableException occurred for {username}: {str(enie).splitlines()[0]}")
-        save_debug_info(driver, username, "login_notinteractable_main")
-    except StaleElementReferenceException as sere:
-        print(f"A StaleElementReferenceException occurred for {username}: {str(sere).splitlines()[0]}")
-        save_debug_info(driver, username, "login_staleelement_main")
-    except Exception as e:
-        print(f"An unexpected error occurred during login for {username}: {type(e).__name__} - {str(e)}")
-        save_debug_info(driver, username, f"login_unexpected_error_{type(e).__name__}")
+    except Exception as e: # Catch-all for other Selenium or unexpected errors
+        print(f"An unexpected error occurred for {username}: {type(e).__name__} - {str(e)}")
+        save_debug_info(driver, username, f"login_unexpected_err_{type(e).__name__}")
     return False
 
 def main():
+    # Random delay: Sleep for a random number of seconds between 0 and 59 minutes (3540 seconds)
+    # This happens if the cron job triggers at HH:00.
+    random_delay_seconds = random.randint(0, 59 * 60)
+    print(f"Script started. Will sleep for {random_delay_seconds // 60} minutes and {random_delay_seconds % 60} seconds before proceeding.")
+    time.sleep(random_delay_seconds)
+    print("Sleep finished. Starting account processing.")
+
     accounts_json_str = os.environ.get("ACCOUNTS_JSON")
+    # ... (rest of the main function remains largely the same as the previous version) ...
     if not accounts_json_str:
         print("Error: ACCOUNTS_JSON environment variable not set.")
         return
@@ -210,7 +240,7 @@ def main():
         return
 
     overall_success_count = 0
-    failed_accounts = []
+    failed_accounts_details = [] # Store tuples of (username, reason)
 
     for i, account in enumerate(accounts):
         username = account.get("username")
@@ -219,60 +249,66 @@ def main():
         print(f"\n--- Processing Account {i+1} of {len(accounts)}: {username} ---")
 
         if not username or not password:
-            print(f"Warning: Skipping account {username} due to missing username or password.")
-            failed_accounts.append(f"{username or 'N/A'} (missing credentials)")
+            msg = f"Skipping account {username or 'N/A'} due to missing credentials."
+            print(f"Warning: {msg}")
+            failed_accounts_details.append((username or "N/A", "Missing credentials"))
             continue
         
-        current_driver = None # Initialize driver to None for this account attempt
+        current_driver = None
+        login_successful_flag = False
         try:
-            current_driver = setup_driver() # Create a new driver instance for each account
-            if not current_driver: # Should not happen if setup_driver raises exception on failure
-                 print(f"Failed to setup WebDriver for account {username}. Skipping.")
-                 failed_accounts.append(f"{username} (driver setup failed)")
+            current_driver = setup_driver()
+            if not current_driver:
+                 msg = f"Failed to setup WebDriver for account {username}. Skipping."
+                 print(msg)
+                 failed_accounts_details.append((username, "WebDriver setup failed"))
                  continue
-
-            # Optional: Clear cookies for belt-and-suspenders, though new instance should be clean
-            # current_driver.delete_all_cookies() 
             
-            login_successful = login_single_account(current_driver, username, password)
+            login_successful_flag = login_single_account(current_driver, username, password)
             
-            if login_successful:
+            if login_successful_flag:
                 overall_success_count += 1
-                print(f"Successfully processed account: {username}")
-                # Add any post-login actions here using current_driver
-                # e.g., current_driver.get("https://client.webhostmost.com/clientarea.php?action=services")
-                # time.sleep(5)
+                print(f"Successfully processed and verified account: {username}")
             else:
-                failed_accounts.append(username)
-                print(f"Failed to process account: {username}")
+                # login_single_account should have printed the reason for failure.
+                # We'll add a generic failure reason if not already more specific.
+                failed_accounts_details.append((username, "Login or verification steps failed"))
+                print(f"Failed to fully process/verify account: {username}")
 
-        except Exception as e_outer: # Catch errors from setup_driver or unexpected issues in the loop
-            print(f"A critical error occurred while processing account {username}: {type(e_outer).__name__} - {e_outer}")
-            failed_accounts.append(f"{username} (critical error: {type(e_outer).__name__})")
-            if current_driver: # If driver exists but error happened outside login_single_account
-                save_debug_info(current_driver, username, "account_loop_critical_error")
+        except Exception as e_outer:
+            error_msg = f"A critical error occurred while processing account {username}: {type(e_outer).__name__} - {str(e_outer)}"
+            print(error_msg)
+            failed_accounts_details.append((username, f"Critical error: {type(e_outer).__name__}"))
+            if current_driver:
+                save_debug_info(current_driver, username, "account_loop_critical_err")
         finally:
             if current_driver:
                 current_driver.quit()
                 print(f"WebDriver instance for {username} has been closed.")
             print("-" * 50)
-            if i < len(accounts) - 1 : # If not the last account
-                time.sleep(3) # Brief pause before starting the next account's browser
+            # Small delay between browser instances.
+            if i < len(accounts) - 1 : time.sleep(random.randint(3,7))
+
 
     print("\n--- Summary ---")
-    print(f"Total accounts processed: {len(accounts)}")
-    print(f"Successfully logged in: {overall_success_count}")
-    print(f"Failed accounts: {len(failed_accounts)}")
-    if failed_accounts:
-        print("List of failed/skipped accounts:")
-        for acc in failed_accounts:
-            print(f"  - {acc}")
+    print(f"Total accounts attempted: {len(accounts)}")
+    print(f"Successfully logged in and verified: {overall_success_count}")
+    failed_count = len(accounts) - overall_success_count
+    print(f"Failed/Skipped accounts: {failed_count}")
+    if failed_accounts_details:
+        print("Details of failed/skipped accounts:")
+        for acc_user, reason in failed_accounts_details:
+            # Check if this username already exists in a more detailed report from login_single_account (less direct)
+            # This summary is high level. Detailed logs are key.
+            print(f"  - User: {acc_user}, Status: {reason}")
     
-    if len(failed_accounts) > 0:
-        print("\nATTENTION: One or more logins failed or a critical error occurred.")
-        # exit(1) # Uncomment to make GitHub Action fail if any account fails
+    if failed_count > 0:
+        print("\nATTENTION: One or more logins failed or encountered a critical error.")
+        # To make GitHub Action step fail if any account fails:
+        # exit(1) 
     else:
-        print("\nAll account login attempts processed successfully.")
+        print("\nAll account login attempts processed and verified successfully.")
+
 
 if __name__ == "__main__":
     main()
