@@ -18,9 +18,6 @@ PASSWORD_SELECTOR = (By.ID, "inputPassword")
 LOGIN_BUTTON_SELECTOR = (By.ID, "login")
 SUCCESS_URL_CONTAINS = "clientarea.php"
 EXPECTED_CLIENT_AREA_TITLE = "Client Area - Web Host Most"
-SUCCESS_DASHBOARD_ELEMENT_SELECTOR = (By.XPATH, "//h1[normalize-space()='Dashboard']")
-SUCCESS_MESSAGE_TEXT = "Log into your Client Area at least once every 45 days to prevent the deletion of your Free Service Plan."
-SUCCESS_MESSAGE_SELECTOR = (By.XPATH, f"//*[contains(normalize-space(.), '{SUCCESS_MESSAGE_TEXT}')]")
 FAILURE_ELEMENT_SELECTOR = (By.XPATH, "//div[contains(@class, 'alert-danger') and normalize-space()='Login Details Incorrect. Please try again.']")
 
 # 最大重试次数
@@ -133,9 +130,6 @@ def login_single_account(driver, username, password):
 
             current_url = driver.current_url
             current_title = driver.title
-            dashboard_visible = False
-            dashboard_header_text = "Not checked/found"
-            found_specific_success_message = False
 
             try:
                 failure_element = driver.find_element(*FAILURE_ELEMENT_SELECTOR)
@@ -147,49 +141,16 @@ def login_single_account(driver, username, password):
                 pass
 
             url_ok = SUCCESS_URL_CONTAINS in current_url
-            if not url_ok:
-                print(f"  URL mismatch: Got '{current_url}', expected to contain '{SUCCESS_URL_CONTAINS}'")
             title_ok = current_title == EXPECTED_CLIENT_AREA_TITLE
-            if not title_ok:
-                print(f"  Title mismatch: Got '{current_title}', expected '{EXPECTED_CLIENT_AREA_TITLE}'")
 
-            try:
-                print("Checking for dashboard header...")
-                wait_start_dash = time.time()
-                dashboard_header = WebDriverWait(driver, 10).until(
-                    EC.visibility_of_element_located(SUCCESS_DASHBOARD_ELEMENT_SELECTOR)
-                )
-                print(f"Dashboard header check took {time.time() - wait_start_dash:.2f}s.")
-                if dashboard_header.is_displayed():
-                    dashboard_visible = True
-                    dashboard_header_text = dashboard_header.text
-                    print(f"  Dashboard header ('{dashboard_header_text}') is visible.")
-            except TimeoutException:
-                print(f"  Dashboard header not found or not visible after {time.time() - wait_start_dash:.2f}s.")
-
-            if url_ok and title_ok and dashboard_visible:
-                print(f"  Checking for specific success message: '{SUCCESS_MESSAGE_TEXT}'")
-                wait_start_msg = time.time()
-                try:
-                    specific_message_element = WebDriverWait(driver, 10).until(
-                        EC.visibility_of_element_located(SUCCESS_MESSAGE_SELECTOR)
-                    )
-                    print(f"Specific success message check took {time.time() - wait_start_msg:.2f}s.")
-                    if specific_message_element.is_displayed():
-                        found_specific_success_message = True
-                        print(f"  Found specific success message: '{specific_message_element.text.strip()}'")
-                except TimeoutException:
-                    print(f"  Specific success message NOT found after {time.time() - wait_start_msg:.2f}s.")
-
-            if url_ok and title_ok and dashboard_visible and found_specific_success_message:
+            if url_ok and title_ok:
                 print(f"ALL SUCCESS CONDITIONS MET for {username}.")
                 print("Pausing for 2 seconds as requested...")
                 time.sleep(2)
                 return True
             else:
                 print(f"Login for {username} FAILED or some success conditions not met.")
-                print(
-                    f"  Status: URL_OK={url_ok}, TITLE_OK={title_ok}, DASHBOARD_VISIBLE={dashboard_visible}, SPECIFIC_MESSAGE_FOUND={found_specific_success_message}")
+                print(f"  Status: URL_OK={url_ok}, TITLE_OK={title_ok}")
                 save_debug_info(driver, username, "login_incomplete_final_check")
         except TimeoutException as te:
             print(f"A TimeoutException occurred for {username} after {time.time() - account_start_time:.2f}s into this account's attempt: {str(te).splitlines()[0]}")
