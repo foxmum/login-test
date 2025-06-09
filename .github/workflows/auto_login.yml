@@ -1,13 +1,10 @@
-name: Monthly WebHostMost Login (Every ~21 Days, Randomized Hour)
+name: Monthly WebHostMost Login
 
 on:
   workflow_dispatch: # Allows manual triggering for testing
   schedule:
-    # Runs at 06:00 UTC on the 1st and 22nd day of every month.
-    # This provides an approximate 21-day interval.
-    # The Python script will then add a random delay up to 59 minutes.
-    - cron: '0 6 1 * *'
-    - cron: '0 6 22 * *'
+    # Runs at 06:35 UTC on the 10th day of every month.
+    - cron: '35 6 10 * *'
 
 jobs:
   login_and_check:
