@@ -16,7 +16,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10' 
+          python-version: '3.10'
 
       - name: Install Google Chrome Stable
         run: |
@@ -33,7 +33,7 @@ jobs:
         env:
           ACCOUNTS_JSON: ${{ secrets.ACCOUNTS_JSON }}
         run: python login.py
-        continue-on-error: true # Keep true to allow artifact upload even on script failure
+        continue-on-error: false # Set to false to fail the job immediately if the script fails
 
       - name: Upload debug artifacts if login script had issues
         if: steps.login_script.outcome != 'success'
@@ -45,15 +45,8 @@ jobs:
             *.html
           retention-days: 7
 
-      - name: Check script execution outcome and fail job if needed
-        if: steps.login_script.outcome != 'success' # Or steps.login_script.conclusion == 'failure'
+      - name: Send notification if login script failed
+        if: steps.login_script.outcome != 'success'
         run: |
-          echo "Login script finished with an unsuccessful outcome (see logs and artifacts)."
-          # If you want the ENTIRE GITHUB ACTION JOB to fail if the python script indicates failure
-          # (e.g. by overall_success_count != len(accounts) or by python script exit(1))
-          # then you MUST ensure the python script exits with a non-zero code for errors
-          # AND this step uses that to fail the job.
-          # The current python script does not exit(1) in main() by default but can be enabled.
-          # For now, this step just logs. To make it fail the job:
-          echo "At least one account failed or a critical error occurred. Marking job as failed."
-          exit 1
+          # Replace this with actual notification code, e.g., sending an email or a Slack message
+          echo "Login script failed. Please check the artifacts and logs."
