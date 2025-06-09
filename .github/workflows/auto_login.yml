@@ -1,44 +1,52 @@
-name: 每月自动登录任务
+name: Monthly WebHostMost Login
+
 on:
+  workflow_dispatch: # Allows manual triggering for testing
   schedule:
-    # 每月10日 6:36 北京时间（UTC+8），对应UTC时间为每月9日22:36
-    - cron: '36 22 9 * *'
-  workflow_dispatch:  # 支持手动触发测试
+    # Runs at 06:35 UTC on the 10th day of every month.
+    - cron: '35 6 10 * *'
 
 jobs:
-  login-job:
+  login_and_check:
     runs-on: ubuntu-latest
     steps:
-      - name: 检出代码
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: 设置Python环境
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: 3.10
+          python-version: '3.10'
 
-      - name: 安装Chrome浏览器
+      - name: Install Google Chrome Stable
         run: |
           sudo apt-get update -y
           sudo apt-get install -y google-chrome-stable
 
-      - name: 安装依赖
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install selenium webdriver-manager
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: 运行登录脚本
+      - name: Run login script
+        id: login_script
         env:
-          ACCOUNTS_JSON: ${{ secrets.ACCOUNTS_JSON }}  # 从仓库Secrets获取账号信息
+          ACCOUNTS_JSON: ${{ secrets.ACCOUNTS_JSON }}
         run: python login.py
-        continue-on-error: true  # 允许任务继续执行以生成调试文件
+        continue-on-error: false # 设置为 false 以便在脚本失败时立即标记任务失败
 
-      - name: 上传调试文件（失败时）
-        if: failure()
+      - name: Upload debug artifacts if login script had issues
+        if: steps.login_script.outcome != 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: login-debug-files
+          name: login-debug-artifacts-${{ github.run_id }}
           path: |
-            debug_*.png
-            debug_*.html
+            *.png
+            *.html
           retention-days: 7
+
+      - name: Check script execution outcome and fail job if needed
+        if: steps.login_script.outcome != 'success'
+        run: |
+          echo "Login script finished with an unsuccessful outcome (see logs and artifacts)."
+          exit 1
